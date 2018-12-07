@@ -7,6 +7,8 @@ import      pprint
 import      subprocess
 import      uuid
 import      shutil
+import      datetime
+from        distutils.dir_util  import  copy_tree
 
 # Project specific imports
 import      pfmisc
@@ -17,15 +19,16 @@ from        pfmisc              import  error
 import      pudb
 import      pftree
 import      pfdicom
+import      pfdicom_tagExtract
 
-class pfdicom_rev(pfdicom.pfdicom):
+class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
     """
 
-    A class based on the 'pfdicom' infrastructure that extracts 
-    and processes DICOM tags according to several requirements.
+    A class based on the 'pfdicom' infrastructure that processes a 
+    regularly organized tree of MRI data into an explicitly constructed
+    age-organized directory structure.
 
-    Powerful output formatting, such as image conversion to jpg/png
-    and generation of html reports is also supported.
+    This sub-class 
 
     """
 
@@ -89,36 +92,20 @@ class pfdicom_rev(pfdicom.pfdicom):
         # Object desc block
         #
         self.str_desc                   = ''
-        self.__name__                   = "pfdicom_rev"
-        self.str_version                = "2.4.2"
+        self.__name__                   = "pfdicom_agesort"
+        self.str_version                = "0.99"
 
         self.b_anonDo                   = False
-        self.str_dcm2jpgDirRaw          = 'dcm2jpgRaw'
-        self.str_dcm2jpgDirResize       = 'dcm2jpgResize'
-        self.str_dcm2jpgDirDCMresize    = 'dcm2jpgDCMresize'
-        self.str_previewFileName        = 'preview.jpg'`
-        self.str_studyFileName          = 'description.json'
-        self.str_serverName             = ''
+        self.str_studyFileName          = 'study.json'
         self.str_DICOMthumbnail         = '300x300'
-
-        # Tags
-        self.b_tagList                  = False
-        self.b_tagFile                  = False
-        self.str_tagStruct              = ''
-        self.str_tagFile                = ''
-        self.d_tagStruct                = {}
-
-        self.dp                         = None
-        self.log                        = None
-        self.tic_start                  = 0.0
-        self.pp                         = pprint.PrettyPrinter(indent=4)
-        self.verbosityLevel             = -1
 
         # Various executable helpers
         self.exec_dcm2jpgConv           = ''
         self.exec_jpgResize             = ''
         self.exec_jpgPreview            = ''
         self.exec_dcmAnon               = ''
+
+        self.stage                      = 0
 
     def anonStruct_set(self):
         """
@@ -147,14 +134,13 @@ class pfdicom_rev(pfdicom.pfdicom):
         # Process some of the kwargs by the base class
         super().__init__(*args, **kwargs)
 
-        self.declare_selfvars()
-        self.externalExecutables_set()
-        self.anonStruct_set()
+        pfdicom_agesort.declare_selfvars(self)
+        pfdicom_agesort.externalExecutables_set(self)
+        pfdicom_agesort.anonStruct_set(self)
 
         for key, value in kwargs.items():
             if key == 'tagStruct':          tagStruct_process(value)
             if key == 'verbosity':          self.verbosityLevel         = int(value)
-            if key == 'server':             self.str_serverName         = value
             if key == 'studyJSON':          self.str_studyFileName      = value
             if key == 'DICOMthumbnail':     self.str_DICOMthumbnail     = value
 
@@ -170,52 +156,23 @@ class pfdicom_rev(pfdicom.pfdicom):
         """
         Callback for reading files from specific directory.
 
-        In the context of pfdicom_rev, this implies reading
-        DICOM files and returning the dcm data set.
+        Here, we simply call the inputReadCallback of the 
+        parent pfdicom_tagExtract method, which will return
+        a single (middle) DCM file for tag extraction per
+        series.
 
         """
-        str_path            = ''
-        l_file              = []
-        b_status            = True
-        l_DCMRead           = []
-        filesRead           = 0
+        # pudb.set_trace()
+        d_ret   = super().inputReadCallback(*args, **kwargs)
 
-        for k, v in kwargs.items():
-            if k == 'l_file':   l_file      = v
-            if k == 'path':     str_path    = v
+        return d_ret
 
-        if len(args):
-            at_data         = args[0]
-            str_path        = at_data[0]
-            l_file          = at_data[1]
-
-        for f in l_file:
-            self.dp.qprint("reading: %s/%s" % (str_path, f), level = 5)
-            d_DCMfileRead   = self.DICOMfile_read( 
-                                    file        = '%s/%s' % (str_path, f)
-            )
-            b_status        = b_status and d_DCMfileRead['status']
-            l_DCMRead.append(d_DCMfileRead)
-            str_path        = d_DCMfileRead['inputPath']
-            filesRead       += 1
-
-        if not len(l_file): b_status = False
-
-        return {
-            'status':           b_status,
-            'l_file':           l_file,
-            'str_path':         str_path,
-            'l_DCMRead':        l_DCMRead,
-            'filesRead':        filesRead
-        }
-
-    def inputReadCallbackJSON(self, *args, **kwargs):
+    def inputReadCallbackSeries(self, *args, **kwargs):
         """
         Callback for reading files from specific directory.
 
-        In the context of pfdicom_rev, this implies reading
-        various contextual JSON files.
-
+        This method reads the (json) files and simply appends
+        this json content into a list structure.
         """
         str_path            = ''
         l_file              = []
@@ -256,79 +213,21 @@ class pfdicom_rev(pfdicom.pfdicom):
             'filesRead':        filesRead
         }
 
-    def inputReadCallbackMAP(self, *args, **kwargs):
-        """
-        Callback for reading files from specific directory.
-
-        In the context of pfdicom_rev, this implies reading
-        DICOM files and returning the dcm data set.
-
-        """
-        b_status            = True
-
-        return {
-            'status':           b_status
-        }
-
-
     def inputAnalyzeCallback(self, *args, **kwargs):
         """
-        Callback for doing actual work on the read data.
-
-        In the context of 'ReV', the "analysis" essentially means
-        calling an anonymization on input data
-
-            * anonymize the DCM files in place
-
+        The initial analysis of a single DCM file is the _tagExtract()
+        operation of the superclass.
         """
-        d_DCMRead           = {}
-        b_status            = False
-        l_dcm               = []
-        l_file              = []
-        filesAnalyzed       = 0
-
         # pudb.set_trace()
+        d_ret   = super().inputAnalyzeCallback(*args, **kwargs)
+        return d_ret
 
-        for k, v in kwargs.items():
-            if k == 'd_DCMRead':    d_DCMRead   = v
-            if k == 'path':         str_path    = v
-
-        if len(args):
-            at_data         = args[0]
-            str_path        = at_data[0]
-            d_DCMRead       = at_data[1]
-
-        for d_DCMfileRead in d_DCMRead['l_DCMRead']:
-            str_path    = d_DCMRead['str_path']
-            l_file      = d_DCMRead['l_file']
-            self.dp.qprint("analyzing: %s" % l_file[filesAnalyzed], level = 5)
-
-            if self.b_anonDo:
-                # For now the following are hard coded, but could in future
-                # be possibly user-specified?
-                for k, v in self.d_tagStruct.items():
-                    d_tagsInStruct  = self.tagsInString_process(d_DCMfileRead['d_DICOM'], v)
-                    str_tagValue    = d_tagsInStruct['str_result']
-                    setattr(d_DCMfileRead['d_DICOM']['dcm'], k, str_tagValue)
-            l_dcm.append(d_DCMfileRead['d_DICOM']['dcm'])
-            b_status    = True
-            filesAnalyzed += 1
-
-        return {
-            'status':           b_status,
-            'l_dcm':            l_dcm,
-            'str_path':         str_path,
-            'l_file':           l_file,
-            'filesAnalyzed':    filesAnalyzed
-        }
-
-    def inputAnalyzeCallbackJSON(self, *args, **kwargs):
+    def inputAnalyzeCallbackSeries(self, *args, **kwargs):
         """
-        Callback for doing actual work on the read data.
+        Callback for doing actual work on the Series data.
 
-        In the context of 'ReV', the "analysis" in the JSON loop
-        essentially means combining the data in the various JSON
-        series files into one.
+        Essentially, this method reads all the per-study json
+        series files and creates a list of this content information.
 
         """
         d_JSONread          = {}
@@ -353,7 +252,7 @@ class pfdicom_rev(pfdicom.pfdicom):
             l_file      = d_JSONread['l_file']
             self.dp.qprint("analyzing: %s" % l_file[filesAnalyzed], level = 5)
             try:
-                l_json.append(d_JSONfileRead['query']['data'][0])
+                l_json.append(d_JSONfileRead['series']['data'][0])
             except:
                 pass
             b_status    = True
@@ -367,15 +266,11 @@ class pfdicom_rev(pfdicom.pfdicom):
             'filesAnalyzed':    filesAnalyzed
         }
 
-    def inputAnalyzeCallbackJSONex(self, *args, **kwargs):
+    def inputAnalyzeCallbackStudy(self, *args, **kwargs):
         """
-        Callback for doing actual work on the read data.
-
-        In the context of 'ReV', the "analysis" for the 'ex' 
-        JSON files simply entails passing the input parameters
-        straight back to the caller so as to be available to 
-        the output stage.
-
+        In this workflow, no "analysis" per se is performed 
+        on the study.json content lists. This method is essentially
+        a "nop".
         """
         d_JSONread          = {}
         b_status            = True
@@ -401,172 +296,116 @@ class pfdicom_rev(pfdicom.pfdicom):
             'filesAnalyzed':    filesAnalyzed
         }
 
-    def inputAnalyzeCallbackMAP(self, *args, **kwargs):
+    @staticmethod
+    def dateDiff_find(astr_date1, astr_date2):
         """
-        Callback for doing actual work on the read data.
+        Simply determine the date different between the
+        two dates.
+
+        Return:
+
+            (totalDays, yearDiff, monthDiffGivenYearDiff, dayDiffGivenYearMonthDiff)
+
+        Thus, 
+
+            dateDiff_find('19740514', '20180821') 
+
+        will return
+
+            (16170, 44, 03, 07)
+
+        or 16170 days | 44-yr/03-mo/07-da
+
+        If <astr_date1> and <astr_date2> do not have to be in chronological order.
+        The function works on absolute date difference, not relative.
+
+        Note that since months have varying length, and since uses average year and
+        month lengths, there migth be minor day-resolution rounding problems.
+
+        For instance
+
+            dateDiff_find( '20180101', '20190101')
+
+        returns 11 months, 30 days; while
+
+            dateDiff_find( '20180101', '20190102')
+
+        returns 12 months, 00 days.
+
 
         """
-        b_status            = True
+        birthY, birthM, birthD  = int(astr_date1[0:4]), int(astr_date1[4:6]), int(astr_date1[6:8])
+        scanY, scanM, scanD     = int(astr_date2[0:4]), int(astr_date2[4:6]), int(astr_date2[6:8])
 
-        return {
-            'status':           b_status
-        }
+        birthDate               = datetime.date(birthY, birthM, birthD)
+        scanDate                = datetime.date(scanY, scanM, scanD)
+        dateDiff                = abs(scanDate - birthDate)
+                
+        # How many years is this?
+        YR                      = int(dateDiff.days / 365.2425)
 
+        # How many months (after YR) is this?
+        daysAfterYR             = int(dateDiff.days - (YR * 365.2425))
+        MO                      = int(daysAfterYR / 30.44)
 
-    def outputSaveCallback(self, at_data, **kwags):
+        # How many days (after YR/MO) is this?
+        daysAfterYRMO           = int(daysAfterYR - (MO * 30.44))
+        DA                      = daysAfterYRMO
+
+        return (dateDiff.days, YR, MO, DA)
+
+    def outputSaveCallback(self, at_data, **kwargs):
         """
-        Callback for saving outputs.
+        Callback for saving stage 1 output.
 
         In order to be thread-safe, all directory/file 
         descriptors must be *absolute* and no chdir()'s
         must ever be called!
 
         Outputs saved:
-
-            * Anon DICOMs if anonymized
-            * JPGs of each DICOM
-            * Preview strip
-            * JSON descriptor file
-
+            * DICOM tag extract payload in each series dir
+            * <series>-series.json with additional series info
         """
-
         path                = at_data[0]
         d_outputInfo        = at_data[1]
-        str_cwd             = os.getcwd()
-        other.mkdir(self.str_outputDir)
-        anonFilesSaved      = 0
-        jpegsGenerated      = 0
-        other.mkdir(path)
-        str_relPath         = path.split(self.str_outputDir+'/./')[1]
 
-        def anonymization_do():
-            nonlocal    anonFilesSaved
-            self.dp.qprint("Saving anonymized DICOMs", level = 3)
-            for f, ds in zip(d_outputInfo['l_file'], d_outputInfo['l_dcm']):
-                ds.save_as('%s/%s' % (path, f))
-                self.dp.qprint("saving: %s/%s" % (path, f), level = 5)
-                anonFilesSaved += 1
-
-        def jpegs_generateFromDCM():
-            nonlocal    jpegsGenerated
-            str_jpgDir          = '%s/%s' % (path, self.str_dcm2jpgDirRaw)
-            self.dp.qprint("Generating jpgs from dcm...", 
-                            end         = '',
-                            level       = 3,
-                            methodcol   = 55)
-            if not os.path.exists(str_jpgDir):
-                other.mkdir(str_jpgDir)
-            for f in d_outputInfo['l_file']:
-                str_jpgFile     = '%s/%s/%s' % (
-                                    path, 
-                                    self.str_dcm2jpgDirRaw, 
-                                    os.path.splitext(f)[0]
-                                    )
-                str_execCmd     = self.exec_dcm2jpgConv                         + \
-                                    ' +oj +Wi 1 +Fa '                           + \
-                                    os.path.join(d_outputInfo['str_path'], f)   + \
-                                    ' ' + str_jpgFile
-                ret             = self.sys_run(str_execCmd)
-                jpegsGenerated  += 1
-            self.dp.qprint(" generated %d jpgs." % jpegsGenerated, 
-                            syslog      = False,
-                            level       = 3)
- 
-        def jpegs_resize():
-            self.dp.qprint( "Resizing jpgs for mosiac... ",
-                            end         = '',
-                            level       = 3,
-                            methodcol   = 55)
-            shutil.copytree(
-                '%s/%s' % (path, self.str_dcm2jpgDirRaw),
-                '%s/%s' % (path, self.str_dcm2jpgDirResize)
-            )
-            str_execCmd         = self.exec_jpgResize                           + \
-            ' -resize 96x96 -background none -gravity center -extent 96x96 '    + \
-                                    '%s/%s/* '   % (path, self.str_dcm2jpgDirResize)
-            self.dp.qprint( "done", syslog = False, level = 3)
-            retMosiac   = self.sys_run(str_execCmd)
-
-            self.dp.qprint( "Resizing jpgs for DICOM tag view... ",
-                            end         = '',
-                            level       = 3,
-                            methodcol   = 55)
-            shutil.copytree(
-                '%s/%s' % (path, self.str_dcm2jpgDirRaw),
-                '%s/%s' % (path, self.str_dcm2jpgDirDCMresize)
-            )
-            str_execCmd         = self.exec_jpgResize                           + \
-            ' -resize %s -background none -gravity center -extent %s '          + \
-                                    '%s/%s/* '                                  % \ 
-                (self.str_DICOMthumbnail, self.str_DICOMthumbnail, 
-                path, self.str_dcm2jpgDirDCMresize)
-            self.dp.qprint( "done", syslog = False, level = 3)
-            retDCMtag   = self.sys_run(str_execCmd)
-            return (retMosiac, retDCMtag)
-
-        def jpegs_middleInSet_tag():
-            str_srcFile         = ""
-            str_destFile        = ""
-            self.dp.qprint( "Tagging 'middle' jpg... ",
-                            end         = '',
-                            level       = 3,
-                            methodcol   = 55)
-            # pudb.set_trace()
-            l_jpgFiles    = [ \
-                f for f in os.listdir('%s/%s' % (path, self.str_dcm2jpgDirRaw)) \
-                if os.path.isfile('%s/%s/%s' % (path, self.str_dcm2jpgDirRaw, f)) \
-            ]
-            if len(l_jpgFiles):
-                try:
-                    str_jpgMiddle   = l_jpgFiles[int(len(l_jpgFiles)/2)]
-                except:
-                    str_jpgMiddle   = l_jpgFiles[0]
-
-                str_series      = os.path.basename(path)
-                str_srcFile     = '%s/%s/%s' % \
-                                    (path, self.str_dcm2jpgDirRaw, str_jpgMiddle)
-                str_destFile    = '%s/%s/middle-%s.jpg' % \
-                                    (path, self.str_dcm2jpgDirRaw, str_series)
-                shutil.copyfile(
-                    str_srcFile,
-                    str_destFile
-                )
-                self.dp.qprint( '%s -> %s.jpg' % (str_jpgMiddle, str_series), 
-                                syslog = False, level = 3)
-            return (str_srcFile, str_destFile)
-
-        def jpegs_previewStripGenerate():
-            self.dp.qprint( "Generating preview strip for mosiac...",
-                            level       = 3,
-                            methodcol   = 55)
-            str_execCmd         = self.exec_jpgPreview                          + \
-                                    ' -append '                                 + \
-                                    '%s/%s/* ' % (path, self.str_dcm2jpgDirResize)    + \
-                                    '%s/%s'     % (path, self.str_previewFileName)
-            retMosaicPreview    = self.sys_run(str_execCmd)
-
-            self.dp.qprint( "Generating preview strip for DCM tag...",
-                            level       = 3,
-                            methodcol   = 55)
-            str_execCmd         = self.exec_jpgPreview                          + \
-                                    ' -append '                                 + \
-                                    '%s/%s/* ' % (path, self.str_dcm2jpgDirDCMresize)    + \
-                                    '%s/raw-%s'     % (path, self.str_previewFileName)
-            retDCMPreview       = self.sys_run(str_execCmd)
-            return (retMosaicPreview, retDCMPreview)
+        d_ret               = super().outputSaveCallback(at_data, **kwargs)
 
         def jsonSeriesDescription_generate():
             # pudb.set_trace()
-            DCM                         = d_outputInfo['l_dcm'][0]
+            DCM                         = d_outputInfo['d_DCMfileRead']['d_DICOM']['dcm']
             str_jsonFileName            = '%s-series.json' % path
             try:
                 dcm_modalitiesInStudy   = DCM.ModalitiesInStudy
             except:
                 dcm_modalitiesInStudy   = "not found"
+            str_patientBirthDate        = DCM.PatientBirthDate
+            try:
+                str_aquisitionDate      = DCM.AcquistionDate
+            except:
+                try:
+                    str_aquisitionDate  = DCM.SeriesDate
+                except:
+                    str_aquisitionDate  = DCM.StudyDate
+            (days, yr, mo, da)          = pfdicom_agesort.dateDiff_find(
+                                                str_patientBirthDate,
+                                                str_aquisitionDate
+                                        ) 
             json_obj = {
-                "query": {
+                "series": {
                     "data": [
                         {
+                            "DCMinputPath" : {
+                                "value":    d_outputInfo['d_DCMfileRead']['inputPath']
+                            },
+                            "AgeCalculated" : {
+                                "value": {
+                                    "daysTotal":    days,
+                                    "yr":           yr,
+                                    "mo":           mo,
+                                    "da":           da
+                                }
+                            },
                             "SeriesInstanceUID": {
                                 "value": '%s' % DCM.SeriesInstanceUID,
                             },
@@ -588,20 +427,12 @@ class pfdicom_rev(pfdicom.pfdicom):
                             "PatientName": {
                                 "value": '%s' % DCM.PatientName,
                             },
-                            #  extra fun
-                            "details": {
-                                "series": {
-                                    "uid":          '%s' % DCM.SeriesInstanceUID,
-                                    "description":  '%s' % DCM.SeriesDescription,
-                                    "date":         '%s' % DCM.SeriesDate,
-                                    "data":         [str_relPath + '/' + s for s in  d_outputInfo['l_file']],
-                                    "files":        str(len(d_outputInfo['l_file'])),
-                                    "preview": {
-                                        "blob":     '',
-                                        "url":      str_relPath + "/preview.jpg",
-                                    },
-                                },
+                            "PatientBirthDate": {
+                                "value": '%s' % DCM.PatientBirthDate   
                             },
+                            "AcquistionDate": {
+                                "value": '%s' % str_aquisitionDate   
+                            }
                         }
                     ],
                 },
@@ -609,499 +440,103 @@ class pfdicom_rev(pfdicom.pfdicom):
             with open(str_jsonFileName, 'w') as f:
                 json.dump(json_obj, f, indent = 4)
 
-        def jsonExampleSummary_generate(str_image):
-
-            def newSet_create(str_ex, str_image):
-                d_set       = {
-                    'name': str_ex,
-                    'imageLocation': [str_image]
-                }
-                return d_set
-
-            # if the ex.json file exists, read it and append
-            # the image location to the internal list,
-            # otherwise create a new file.
-            d_summary                   = {}
-            str_ex                      = os.path.basename(os.path.dirname(str_relPath))
-            str_monthFileName           = '%s/%s.json' % (os.path.dirname(os.path.dirname(path)),'ex')
-            if os.path.exists(str_monthFileName):
-                with open(str_monthFileName) as jf:
-                    d_summary = json.load(jf)
-                if str_ex in d_summary:
-                    d_summary[str_ex]['imageLocation'].append(str_image)
-                else:
-                    d_summary[str_ex] = newSet_create(str_ex, str_image)
-            else:
-                d_summary[str_ex]       = newSet_create(str_ex, str_image)
-            with open(str_monthFileName, 'w') as mf:
-                json.dump(d_summary, mf, indent = 4)
-
-        if self.b_anonDo: anonymization_do()
-        jpegs_generateFromDCM()
-        jpegs_resize()
-        str_srcImage, str_destImage = jpegs_middleInSet_tag()
-        jpegs_previewStripGenerate()
         jsonSeriesDescription_generate()
-        jsonExampleSummary_generate(str_destImage)
 
-        return {
-            'status':       True,
-            'filesSaved':   jpegsGenerated
-        }
+        return d_ret
 
-    def outputSaveCallbackJSON(self, at_data, **kwags):
+    def outputSaveCallbackSeries(self, at_data, **kwags):
         """
         Callback for saving outputs.
 
-        In order to be thread-safe, all directory/file 
-        descriptors must be *absolute* and no chdir()'s
-        must ever be called!
-
         Outputs saved:
-
-            * JSON study descriptor file
-            * index.html
-
+            * JSON study descriptor file. One file per study.
         """
 
-        def str_indexHTML_create(str_path):
-            """
-            Return a string to be saved in 'index.html' 
-            """
-            fieldFind       = lambda str_url, field: str_url.split(field)[0].split('/')[-1] 
-            str_yr          = fieldFind(str_path, '-yr')
-            str_mo          = fieldFind(str_path, '-mo')
-            str_ex          = fieldFind(str_path, '-ex')
-            if self.str_serverName == '':
-                    str_html = """
-                    <html>
-                        <head>
-                            <title>FNNDSC</title>
-                            <script>
-                            var target = window.location.href.split('library-anon/')[0]+'?year=%s&month=%s&example=%s';
-                            window.location.replace(target);
-                            </script>
-                        </head>
-                        <body style="background: black;" text="lightgreen">
-                        </body>
-                    </html>
-
-                """ % (str_yr, str_mo, str_ex)
-            else:
-                str_html = """
-                    <html>
-                        <head>
-                            <title>FNNDSC</title>
-                            <meta http-equiv="refresh" content="0; URL=%s?year=%s&month=%s&example=%s">
-                            <meta name="keywords" content="automatic redirection">
-                        </head>
-                        <body style="background: black;" text="lightgreen">
-                        </body>
-                    </html>
-
-                """ % (self.str_serverName, str_yr, str_mo, str_ex)
-            return str_html
-        #pudb.set_trace()
         path                = at_data[0]
         d_outputInfo        = at_data[1]
-        str_cwd             = os.getcwd()
         other.mkdir(self.str_outputDir)
-        jsonFilesSaved      = 0
         other.mkdir(path)
-        str_relPath         = './'
+
         try:
             str_relPath     = path.split(self.str_outputDir+'/./')[1]
         except:
             str_relPath     = './'
         filesSaved          = 0
 
+        d_age               = d_outputInfo['l_json'][0]['AgeCalculated']['value']
+        str_studyDCMinputDir= os.path.dirname(d_outputInfo['l_json'][0]['DCMinputPath']['value'])
+        str_leafNode        = '%s-%s' % (os.path.dirname(str_relPath), 
+                                         os.path.basename(str_relPath).split('-')[-1])
+        str_ageSortPath     = '%02d-yr/%02d-mo/%s-ex' % (d_age['yr'], d_age['mo'], str_leafNode)
+
         json_study          = {
-            'data': d_outputInfo['l_json']
+            'sourcePathDCM':    str_studyDCMinputDir,    
+            'sourcePathTag':    path,
+            'ageSortPath':      str_ageSortPath,
+            'data':             d_outputInfo['l_json']
         }
 
         with open('%s/%s' % (path, self.str_studyFileName), 'w') as f:
             json.dump(json_study, f, indent = 4)
             filesSaved += 1 
         f.close()
-        str_html = str_indexHTML_create(path)
-        with open('%s/index.html' % (path), 'w') as f:
-            f.write(str_html)
-            filesSaved += 1 
-        f.close()
 
         return {
             'status':       True,
             'filesSaved':   filesSaved
         }
 
-    def outputSaveCallbackJSONex(self, at_data, **kwags):
+    def outputSaveCallbackStudy(self, at_data, **kwags):
         """
         Callback for saving outputs.
 
-        In order to be thread-safe, all directory/file 
-        descriptors must be *absolute* and no chdir()'s
-        must ever be called!
+        This method "moves" the original study content to a new tree 
+        structure based on the study patient age.
 
-        Outputs saved:
+        First, this method needs to copytree the *original* image (DCM)
+        tree to the new location, then it needs to copy the extracted 
+        tags into that moved tree.
 
-            * JSON study descriptor file
-            * index.html
+        It represents the terminal point of the processing stream.
 
         """
 
-        def table_generate(str_title, lstr_images, str_pathProcess):
-            """
-            Generate a table of thumbnails about a list of images
-            """
-            int_nbColumn = 5
-            lstr_images     = [i for i in lstr_images if 'mo/' in i]
-            lstr_i          = [i.split('mo/')[1] for i in lstr_images]
-            str_dir = str_pathProcess+'/'+str_title+'/'
-            int_nbSeries = len(list(filter(os.path.isdir, [os.path.join(str_dir, fold) for fold in os.listdir(str_dir)])))
-            int_nbRow = int_nbSeries // int_nbColumn
-            int_rest = int_nbSeries % int_nbColumn
-            if int_rest != 0:
-                int_nbRow += 1
-            int_count = 0
-            str_table = ""
-            for x in range(0, int_nbRow):
-                rangeMin = 0 + int_nbColumn*x
-                if x == int_nbRow-1 and int_rest != 0:
-                    rangeMax = rangeMin + int_rest
-                else:
-                    rangeMax = rangeMin + int_nbColumn
-
-                str_table += """<tr>\n"""
-                if x == 0:
-                    str_table += """<th class="tg-0lax" rowspan="%s" style="font-size: 18px; padding 0px 10px"><a href=%s>%s</a</th>\n""" % (int_nbRow*2,str_title, str_title)
-                
-                for str_image in lstr_i:
-                   #str_table += "count : %s" % (int_count)
-                    if int_count in range(rangeMin, rangeMax):
-                        str_header = str_image.split('ex/')[1].split('/dcm2jpg')[0]
-                        str_header = str_header.split('-')[0][0:12]
-                        #str_table += "x : %s rangeMin : %s rangeMax : %s count : %s int_nbRow : %s" % (x , rangeMin, rangeMax,  int_count, int_nbRow)
-                        str_table += """<th class="tg-0lax" style="text-align: center;">%s</th>\n""" % str_header
-                    int_count += 1
-                if x == int_nbRow-1 and int_rest != 0:
-                    restCols = int_nbColumn-int_rest   
-                    str_table += """<th rowspan="2" colspan="%s" style="text-align: center;"></th>\n""" % restCols
-                int_count = 0
-                str_table +="""
-                </tr>
-                <tr>
-                """
-                for str_image in lstr_i:
-                    if int_count in range(rangeMin, rangeMax):
-                        str_image = str_image.split('/')[0]+'/'+str_image.split('/')[1]+'/preview.jpg'
-                        str_htmlImage = '<img class ="128" src="%s" ondblclick=\"displayHover(this)\" onmousemove=\"onMove();\" onmouseout=\"positionThumbnail(0.5, this);\" onload=\"positionThumbnail(0.5, this);\">' % str_image
-                        str_table += """<td class="tg-0lax tab"><div class="previewContainer"><a href=%s></a>%s</div></td>\n""" % (str_title, str_htmlImage)
-                    int_count += 1
-                int_count = 0
-                str_table +="""</tr>\n"""
-
-            # And combine into a table:
-            str_table = """
-            <table class="tg">
-               %s
-            </table>
-            <br>
-            """ % str_table
-            return str_table
-
-        def str_indexHTML_create(str_heading, d_ex, str_pathProcess):
-            """
-            Return a string to be saved in 'index.html' 
-            """
-            str_html        = """
-<!DOCTYPE html>
-<html>
-<head>
-        <title>%s</title>
-        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-
-  <script>
-
-    var lastelem;
-    var display = 0;
-
-    var mouseX = 0, mouseY = 0;
-    var elemDisplay
-
-    function myMove(evt) {
-       evt = evt || window.event;
-
-        mouseX = evt.pageX;
-        mouseY = evt.pageY;
-
-        // IE 8
-        if (mouseX === undefined) {
-            mouseX = e.clientX + document.body.scrollLeft + document.documentElement.scrollLeft;
-            mouseY = e.clientY + document.body.scrollTop + document.documentElement.scrollTop;
-        }
-      }
-       document.onmousemove = myMove;
-       if (!window.event) {document.captureEvents(Event.MOUSEMOVE);}
-
-       function centerThumbnail(e){
-        var elem = document.elementFromPoint(mouseX, mouseY);
-        positionThumbnail(0.5, lastelem);
-      }
-
-      function positionThumbnail(normalizedPosition, target) {
-        var THUMBNAIL_HEIGHT
-        if (target.className == 128)
-          THUMBNAIL_HEIGHT = 128;
-        if (target.className == 350)
-          THUMBNAIL_HEIGHT = 350;
-        const TOTAL_HEIGHT = target.offsetHeight;
-        const nbFrames = TOTAL_HEIGHT / THUMBNAIL_HEIGHT;
-        const offset = Math.floor(normalizedPosition * nbFrames) * THUMBNAIL_HEIGHT;
-
-        if (target.nodeName == "IMG"){
-          if(normalizedPosition == 0.5)
-            setTimeout(function (){
-              target.style.transform =
-              `translateY(-${offset}px)`;
-            }, 10);
-          target.style.transform =
-          `translateY(-${offset}px)`;
-        }
-      }
-
-      function onMove(e) {
-        var elem = document.elementFromPoint(mouseX - window.pageXOffset, mouseY - window.pageYOffset);
-        var POSimg = getOffset(elem)
-        const normalizedPosition = (mouseX - POSimg.X) / elem.clientWidth;
-        lastelem = elem;
-        positionThumbnail(normalizedPosition, elem);
-      }
-
-      function getOffset(el) {
-        const rect = el.getBoundingClientRect();
-        return {
-          X: rect.left + window.scrollX,
-          Y: rect.top + window.scrollY
-        };
-      }
-
-      function findPos(obj){
-        var curleft = 0;
-        var curtop = 0;
-
-        if (obj.offsetParent) {
-          do {
-            curleft += obj.offsetLeft;
-            curtop += obj.offsetTop;
-          } while (obj = obj.offsetParent);
-
-          return {X:curleft,Y:curtop};
-        }
-      }
-
-
-      function resize(){
-        var width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
-        var displaywidth = width-765-(width*2/100)
-        if(document.getElementsByClassName('divhoverDisplay')[0]!= undefined){
-          document.getElementsByClassName('divhoverDisplay')[0].style.width = displaywidth+"px";
-        }
-        if(document.getElementsByClassName('divhoverHide')[0]!= undefined){
-          document.getElementsByClassName('divhoverHide')[0].style.width = displaywidth+"px";
-        }
-        if(width < 1350 && document.getElementsByClassName('divhoverDisplay')[0]!= undefined){
-          document.getElementsByClassName('divhoverDisplay')[0].className = 'divhoverHide';
-
-        }
-        else if (width > 1350 && document.getElementsByClassName('divhoverHide')[0]!= undefined){
-          document.getElementsByClassName('divhoverHide')[0].className = 'divhoverDisplay';
-
-        }
-      }
-
-    /*function displayHover(e){
-      if (document.getElementsByClassName('focus')[0]!= undefined)
-        document.getElementsByClassName('focus')[0].className = 'tg-0lax tab';
-       if (document.getElementsByClassName('divhoverDisplay')[0]!= undefined){
-        document.getElementsByClassName('divhoverDisplay')[0].style.background = "#333537";
-        e.parentNode.parentNode.className = "tg-0lax tab focus"
-        var seriesName = e.src.split('ex/')[1];
-        seriesName = seriesName.split('/preview.jpg')[0];
-        var imageSRC = e.src.split('preview')[0]+'dcm2jpgRaw/'+'middle-'+seriesName+'.jpg';
-        var tagrawSRC = e.src.split('preview')[0]+'tag-raw.txt'
-        var link = e.src.split("-ex/")[0]+'-ex/';
-        var tagraw;
-        var client = new XMLHttpRequest();
-        client.open('GET',tagrawSRC);
-        client.onreadystatechange = function() {
-          tagraw = client.responseText;
-          var content = '<br><div style = "text-align: center; font-size: 20px">'+seriesName+'</div><br>'
-          content = content + '<a href='+link+'><img style="width: 350px; height:350px; display: block; margin-left: auto; margin-right: auto;"src="'+imageSRC+'"></a>';
-          content = content + '<pre>'+tagraw+'</pre>'
-          document.getElementsByClassName('divhoverDisplay')[0].innerHTML = content;
-          elemDisplay = e
-        }
-        client.send();
-      }
-    }*/
-
-    function displayHover(e){
-      if (document.getElementsByClassName('focus')[0]!= undefined)
-        document.getElementsByClassName('focus')[0].className = 'tg-0lax tab';
-       if (document.getElementsByClassName('divhoverDisplay')[0]!= undefined){
-        document.getElementsByClassName('divhoverDisplay')[0].style.background = "#333537";
-        e.parentNode.parentNode.className = "tg-0lax tab focus"
-
-        var tmp_img = new Image();
-        tmp_img.src=e.src.split('preview')[0]+'raw-preview.jpg'
-        real_width = tmp_img.width
-        real_height = tmp_img.height
-        new_height = real_height/real_width*350
-        var seriesName = e.src.split('ex/')[1];
-        seriesName = seriesName.split('/preview.jpg')[0];
-        var tagrawSRC = e.src.split('preview')[0]+'tag-raw.txt'
-        var tagraw;
-        var link = e.src.split("-ex/")[0]+'-ex/';
-        var client = new XMLHttpRequest();
-        client.open('GET',tagrawSRC);
-        client.onreadystatechange = function() {
-          tagraw = client.responseText;
-          var content = '<br><div style = "text-align: center; font-size: 20px">'+seriesName+'</div><br>'
-          content = content + '<div style="width: 350px; height:350px; display: block;  margin: auto; overflow: hidden;"><a href='+link+'><img class = "350" style="width: 350px; height:'+new_height+'px;" src="'+e.src.split('preview')[0]+'raw-preview.jpg'+'" onmousemove="onMove();" onmouseout="positionThumbnail(0.5, this);" onload="positionThumbnail(0.5, this);"></a></div>';
-          content = content + '<pre>'+tagraw+'</pre>'
-          document.getElementsByClassName('divhoverDisplay')[0].innerHTML = content;
-          elemDisplay = e
-        }
-        client.send();
-      }
-    }
-
-
-
-  </script>
-</head>
-<style type="text/css">
-    p {font-family: Ubuntu,Roboto,Helvetica,Arial,sans-serif;}
-    .tg {background-color: #000; font-family: Ubuntu,Roboto,Helvetica,Arial,sans-serif;}
-    .tg {border-collapse:collapse;border-spacing:0;}
-    .tg td{font-size:14px;padding:2px 2px 2px 2px;border-style:solid;border-width:0px;overflow:hidden;word-break:normal;border-color:black;}
-    .tg th{font-size:14px;font-weight:normal;padding:2px 2px;border-style:solid;border-width:0px;overflow:hidden;word-break:normal;border-color:black;}
-    .tg td:hover{cursor: pointer; background-color: #fff; color: #000;}
-    .tg:hover{cursor: pointer; border:2px solid #fff;}
-    .tg .tg-0lax{text-align:left;vertical-align:middle; border:1px solid #1d1f21; white-space: nowrap; max-width: 128px; max-height: 128px;}
-    .table .th .td {border: 1px solid #4a4b4d;}
-    .divhoverHide {display:none;}
-    .divhoverDisplay {display:block; background-color : #1d1f21 ; z-index: 20; text-align: left; font-size: 11px; color : white;border-color: white; overflow: auto; font-family: Ubuntu,Roboto,Helvetica,Arial,sans-serif;}
-    a {text-decoration: none; color: #4a4b4d;}
-    img {min-width: 128px; min-height: 128px; background-color: #000;}
-    .previewContainer {height: 128px; width: 128px; margin: auto; overflow: hidden;}
-    .focus {background-color:#2196f3!important;}
-</style>
-
-<body style = "background-color: #1d1f21; color: white" onresize="resize()" onload="resize()">
-    <h1 style="font-family: Ubuntu,Roboto,Helvetica,Arial,sans-serif; position: relative; left:295px;">%s</h1>
-    <p>
-    <b>Single</b> click on an image below to launch the embedded viewer.
-    </p>
-    <p> 
-    <b>Double</b> click on an image below to browse DICOM tags.
-    </p> 
-    <p>
-    Note that if the browser window is too small, the DICOM tag viewer will not display.
-    </p>
-    <div class="divhoverDisplay" style="position:fixed; top: 3%%; left : 750px;height: 94%%;"></div>
-    <br>
-            """ % (str_heading, str_heading)
-            str_table = ""
-            for str_key, d_singleEx in sorted(d_ex.items()):
-                l_images = d_singleEx['imageLocation']
-                str_table += table_generate(str_key, l_images, str_pathProcess)
-
-            str_html += """
-            %s
-<script>
-var timer = 0;
-var delay = 500;
-var prevent = false;
-
-$(".tg tr")
-  .on("dblclick", function() {
-    prevent = true;
-    clearTimeout(timer);
-  })
-  .on("click", function() {
-    var tableRaw = this
-    timer = setTimeout(function() {
-      if (!prevent) {
-        var href = $(tableRaw).find("a").attr("href");
-        if(href) {
-           window.location = href;
-        }
-      }
-      prevent = false;
-    }, delay);
-  });
-</script>
-</body>
-</html>
-            """ % str_table
-
-            return str_html
-
-        # pudb.set_trace()
+        pudb.set_trace()
         path                = at_data[0]
-        d_JSONex            = at_data[1]
+        d_JSONStudy         = at_data[1]
         str_cwd             = os.getcwd()
         other.mkdir(self.str_outputDir)
-        jsonFilesSaved      = 0
-        other.mkdir(path)
+
+        str_sourcePathTag   = path
+        str_sourcePathDCM   = d_JSONStudy['d_JSONread']['l_JSONread'][0]['sourcePathDCM']
+        str_destinationPath = '%s/%s' % (
+            self.str_outputDir, 
+            d_JSONStudy['d_JSONread']['l_JSONread'][0]['ageSortPath'])
         str_relPath         = './'
         try:
             str_relPath     = path.split(self.str_outputDir+'/./')[1]
         except:
             str_relPath     = './'
-        filesSaved          = 0
 
-        str_html = str_indexHTML_create(
-                        str_relPath,
-                        d_JSONex['d_JSONread']['l_JSONread'][0],
-                        path
-        )
-        with open('%s/index.html' % (path), 'w') as f:
-            f.write(str_html)
-            filesSaved += 1 
-        f.close()
+        # First copy the orignal study tree over
+        copy_tree(str_sourcePathDCM, str_destinationPath, preserve_symlinks = 1)
+        # shutil.copytree(str_sourcePathDCM, str_destinationPath, symlinks = True)
+
+        # Now copy the tag data into this tree as well
+        copy_tree(str_sourcePathTag, str_destinationPath, preserve_symlinks = 1)
+        # shutil.copytree(str_sourcePathTag, str_destinationPath, symlinks = True)
 
         return {
             'status':       True,
-            'filesSaved':   filesSaved
+            'filesSaved':   1
         }
 
-
-    def outputSaveCallbackMAP(self, at_data, **kwags):
-        """
-        Callback for saving outputs.
-
-        In order to be thread-safe, all directory/file 
-        descriptors must be *absolute* and no chdir()'s
-        must ever be called!
-
-        Outputs saved:
-
-            * JSON study descriptor file
-            * index.html
-
-        """
-        filesSaved          = 0
-
-        return {
-            'status':       True,
-            'filesSaved':   filesSaved
-        }
 
     def processDCM(self, **kwargs):
         """
-        A simple "alias" for calling the pftree method.
+        The callback for the initial stage 1 process. Since stage 1 is
+        really a call to the parent pfdicom_tagExtract, we shadow that
+        machinery by calling the parent's callbacks here. 
         """
         d_process       = {}
         d_process       = self.pf_tree.tree_process(
@@ -1112,28 +547,29 @@ $(".tg tr")
         )
         return d_process
 
-    def processJSON(self, **kwargs):
+    def processSeries(self, **kwargs):
         """
         A simple "alias" for calling the pftree method.
         """
+        # pudb.set_trace()
         d_process       = {}
         d_process       = self.pf_tree.tree_process(
-                            inputReadCallback       = self.inputReadCallbackJSON,
-                            analysisCallback        = self.inputAnalyzeCallbackJSON,
-                            outputWriteCallback     = self.outputSaveCallbackJSON,
+                            inputReadCallback       = self.inputReadCallbackSeries,
+                            analysisCallback        = self.inputAnalyzeCallbackSeries,
+                            outputWriteCallback     = self.outputSaveCallbackSeries,
                             persistAnalysisResults  = False
         )
         return d_process
 
-    def processJSONex(self, **kwargs):
+    def processStudy(self, **kwargs):
         """
         A simple "alias" for calling the pftree method.
         """
         d_process       = {}
         d_process       = self.pf_tree.tree_process(
-                            inputReadCallback       = self.inputReadCallbackJSON,
-                            analysisCallback        = self.inputAnalyzeCallbackJSONex,
-                            outputWriteCallback     = self.outputSaveCallbackJSONex,
+                            inputReadCallback       = self.inputReadCallbackSeries,
+                            analysisCallback        = self.inputAnalyzeCallbackStudy,
+                            outputWriteCallback     = self.outputSaveCallbackStudy,
                             persistAnalysisResults  = False
         )
         return d_process        
@@ -1158,6 +594,19 @@ $(".tg tr")
         
         return d_process        
     
+    def filelist_prune(self, at_data, *args, **kwargs):
+        """
+        The filelist_prune behaves differently pending the processing stage.
+        """
+
+        # pudb.set_trace()
+        if self.stage == 1:
+            d_ret   = pfdicom_tagExtract.pfdicom_tagExtract.filelist_prune(self, at_data, *args, **kwargs)
+        if self.stage == 2 or self.stage == 3:
+            d_ret   = pfdicom.pfdicom.filelist_prune(self, at_data, *args, **kwargs)
+
+        return d_ret
+
     def run(self, *args, **kwargs):
         """
         The run method calls the base class run() to 
@@ -1169,16 +618,16 @@ $(".tg tr")
         """
         b_status            = True
         d_process           = {}
-
         func_process        = self.processDCM
         self.str_analysis   = 'DICOM analysis'
 
         for k, v in kwargs.items():
             if k == 'func_process': func_process        = v
-            if k == 'description':  self.str_analysis   = v          
+            if k == 'description':  self.str_analysis   = v
+            if k == 'stage':        self.stage          = v          
 
         self.dp.qprint(
-                "Starting pfdicom_rev %s... (please be patient while running)" % \
+                "Starting pfdicom_agesort %s... (please be patient while running)" % \
                     self.str_analysis, 
                 level = 1
                 )
@@ -1187,7 +636,9 @@ $(".tg tr")
         # and does an initial analysis. Also suppress the
         # base class from printing JSON results since those 
         # will be printed by this class
-        d_pfdicom       = super().run(
+        pudb.set_trace()
+        d_pfdicom       = pfdicom.pfdicom.run(
+                                        self,
                                         JSONprint   = False,
                                         timerStart  = False
                                     )
@@ -1211,7 +662,7 @@ $(".tg tr")
             self.ret_dump(d_ret, **kwargs)
 
         self.dp.qprint(
-                'Returning from pfdicom_rev %s...' % 
+                'Returning from pfdicom_agesort %s...' % 
                 self.str_analysis, level = 1
         )
 

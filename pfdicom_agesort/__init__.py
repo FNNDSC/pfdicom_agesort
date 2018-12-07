@@ -1,4 +1,4 @@
 try:
-    from .pfdicom_rev       import pfdicom_rev
+    from .pfdicom_agesort       import pfdicom_agesort
 except:
-    from pfdicom_rev        import pfdicom_rev
+    from pfdicom_agesort        import pfdicom_agesort
