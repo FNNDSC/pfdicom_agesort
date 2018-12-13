@@ -98,12 +98,16 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         self.b_anonDo                   = False
         self.str_studyFileName          = 'study.json'
         self.str_DICOMthumbnail         = '300x300'
+        self.b_symlinkDCMdata           = False
+        self.b_doNotCleanUp             = False
 
         # Various executable helpers
         self.exec_dcm2jpgConv           = ''
         self.exec_jpgResize             = ''
         self.exec_jpgPreview            = ''
         self.exec_dcmAnon               = ''
+
+        self.link                       = '.LINK'
 
         self.stage                      = 0
 
@@ -125,7 +129,7 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
 
         def tagStruct_process(str_tagStruct):
             self.str_tagStruct          = str_tagStruct
-            if len(self.str_tagStruct):
+            if len(self.str_tagStruct):             
                 self.d_tagStruct        = json.loads(str_tagStruct)
                 self.b_anonDo           = True
 
@@ -143,6 +147,8 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
             if key == 'verbosity':          self.verbosityLevel         = int(value)
             if key == 'studyJSON':          self.str_studyFileName      = value
             if key == 'DICOMthumbnail':     self.str_DICOMthumbnail     = value
+            if key == 'symlinkDCMdata':     self.b_symlinkDCMdata       = value
+            if key == 'doNotCleanUp':       self.b_doNotCleanUp         = value
 
         # Set logging
         self.dp                        = pfmisc.debug(    
@@ -486,6 +492,63 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
             'filesSaved':   filesSaved
         }
 
+    def mklinks(self, oldtree, newtree):
+        """
+        This method (and 'linknames') is thinly adapted from:
+        
+        http://www.java2s.com/Code/Python/Utility/Makeacopyofadirectorytreewithsymboliclinkstoallfilesintheoriginaltree.htm
+
+        with minor incorporation changes as well as updates to python3.
+        """
+        link_may_fail   = 0
+        if not os.path.isdir(oldtree):
+            self.dp.qprint(oldtree + ': not a directory', comms = 'error')
+            return False
+        try:
+            other.mkdir(newtree)
+        except os.error as msg:
+            self.dp.qprint(newtree + ': cannot mkdir:' + msg, comms = 'error')
+            return False
+        linkname = os.path.join(newtree, self.link)
+        try:
+            os.symlink(os.path.join(os.pardir, oldtree), linkname)
+        except os.error as msg:
+            if not link_may_fail:
+                self.dp.qprint(linkname + ': cannot symlink:' + msg, comms='error')
+                return False
+            else:
+                self.dp.qprint(linkname + ': warning: cannot symlink:' + msg, comms='error')
+        self.linknames(oldtree, newtree, self.link)
+        return True
+
+    @staticmethod
+    def linknames(old, new, link):
+        try:
+            names = os.listdir(old)
+        except os.error as msg:
+            print(old + ': warning: cannot listdir:' + msg)
+            return
+        for name in names:
+            if name not in (os.curdir, os.pardir):
+                oldname = os.path.join(old, name)
+                linkname = os.path.join(link, name)
+                newname = os.path.join(new, name)
+                if os.path.isdir(oldname) and \
+                not os.path.islink(oldname):
+                    try:
+                        other.mkdir(newname)
+                        ok = 1
+                    except:
+                        print(newname + \
+                            ': warning: cannot mkdir:' + msg)
+                        ok = 0
+                    if ok:
+                        linkname = os.path.join(os.pardir,
+                                                linkname)
+                        pfdicom_agesort.linknames(oldname, newname, linkname)
+                else:
+                    os.symlink(linkname, newname)
+
     def outputSaveCallbackStudy(self, at_data, **kwags):
         """
         Callback for saving outputs.
@@ -501,10 +564,8 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
 
         """
 
-        pudb.set_trace()
         path                = at_data[0]
         d_JSONStudy         = at_data[1]
-        str_cwd             = os.getcwd()
         other.mkdir(self.str_outputDir)
 
         str_sourcePathTag   = path
@@ -518,19 +579,24 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         except:
             str_relPath     = './'
 
-        # First copy the orignal study tree over
-        copy_tree(str_sourcePathDCM, str_destinationPath, preserve_symlinks = 1)
-        # shutil.copytree(str_sourcePathDCM, str_destinationPath, symlinks = True)
+        # Process the orignal study tree over
+        if not self.b_symlinkDCMdata:
+            copy_tree(str_sourcePathDCM, str_destinationPath, preserve_symlinks = 1)
+        else:
+            self.mklinks(str_sourcePathDCM, str_destinationPath)
 
         # Now copy the tag data into this tree as well
         copy_tree(str_sourcePathTag, str_destinationPath, preserve_symlinks = 1)
         # shutil.copytree(str_sourcePathTag, str_destinationPath, symlinks = True)
 
+        # and finally, clean up the original tag path if specified
+        if not self.b_doNotCleanUp:
+            shutil.rmtree(os.path.dirname(str_sourcePathTag), ignore_errors = True)
+
         return {
             'status':       True,
             'filesSaved':   1
         }
-
 
     def processDCM(self, **kwargs):
         """
@@ -636,7 +702,7 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         # and does an initial analysis. Also suppress the
         # base class from printing JSON results since those 
         # will be printed by this class
-        pudb.set_trace()
+        # pudb.set_trace()
         d_pfdicom       = pfdicom.pfdicom.run(
                                         self,
                                         JSONprint   = False,

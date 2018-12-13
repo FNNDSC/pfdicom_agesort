@@ -76,6 +76,7 @@ def synopsis(ab_shortOnly = False):
                     [-F|--tagFile <tagFile>] |                      \\
                     [-T|--tagList <tagList>] |                      \\
                     [-m|--image <imageFile>]                        \\
+                    [-S|--symlinkDCMdata]
                      -O|--outputDir <outputDir>                     \\
                      -o|--output <outputFileStem>                   \\
                     [-s|--imageScale <factor>[:<interpolation>]]    \\
@@ -149,6 +150,15 @@ def synopsis(ab_shortOnly = False):
         [-T|--tagList <tagList>]
         Read the list of comma-separated tags in <tagList>, and print the
         corresponding tag information parsed from the DICOM <inputFile>.
+
+        [-S|--symlinkDCMdata]
+        If true/specified, perform a symlink of the original DICOM data to
+        the final output directory tree. If false, a copy of the original
+        DICOM data is performed.
+
+        [-D|--doNotCleanUp]
+        If true, do not cleanup the original tag data tree created when
+        analysing the original DICOM tree structure.
 
         [-m|--image <[<index>:]imageFile>]
         If specified, also convert the <inputFile> to <imageFile>. If the
@@ -291,6 +301,16 @@ parser.add_argument("-s", "--imageScale",
                     help    = "scale images with factor and optional :interpolation",
                     dest    = 'imageScale',
                     default = '')
+parser.add_argument("-S", "--symlinkDCMdata",
+                    help    = "symlink original DCM data to output directory",
+                    dest    = 'symlinkDCMdata',
+                    action  = 'store_true',
+                    default = False)
+parser.add_argument("-D", "--doNotCleanUp",
+                    help    = "leave the original tag tree intact",
+                    dest    = 'doNotCleanUp',
+                    action  = 'store_true',
+                    default = False)
 parser.add_argument("-t", "--outputFileType",
                     help    = "list of output report types",
                     dest    = 'outputFileType',
@@ -399,6 +419,8 @@ for (str_ext, str_inputDir, str_outputDir) in zip(lstr_stageExtenions, lstr_inpu
                         outputFileStem      = args.outputFileStem,
                         outputLeafDir       = args.outputLeafDir,
                         useIndexhtml        = args.useIndexhtml,
+                        symlinkDCMdata      = args.symlinkDCMdata,
+                        doNotCleanUp        = args.doNotCleanUp,
                         outputFileType      = args.outputFileType,
                         tagFile             = args.tagFile,
                         tagList             = args.tagList,
@@ -425,7 +447,7 @@ lstr_stageDesc      = [
     'series JSON analysis --> study JSON',
     'study JSON --> new tree'
 ]
-pudb.set_trace()
+# pudb.set_trace()
 stage               = 1
 for (pf_obj, str_desc, f_process) in zip(l_pf_dicom, lstr_stageDesc, lf_process):
     if args.stage == 'all' or int(args.stage) == stage:
