@@ -591,7 +591,13 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
 
         # and finally, clean up the original tag path if specified
         if not self.b_doNotCleanUp:
-            shutil.rmtree(os.path.dirname(str_sourcePathTag), ignore_errors = True)
+            # First, remove the sourcetagpath
+            shutil.rmtree(str_sourcePathTag, ignore_errors = True)
+            # Now we need to check if the parent is empty, and if so, 
+            # remove the parent
+            str_parentDir   = os.path.dirname(str_sourcePathTag)
+            if not os.listdir(str_parentDir):
+                shutil.rmtree(str_parentDir, ignore_errors = True)
 
         return {
             'status':       True,
