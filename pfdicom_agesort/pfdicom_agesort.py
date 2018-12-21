@@ -93,7 +93,7 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         #
         self.str_desc                   = ''
         self.__name__                   = "pfdicom_agesort"
-        self.str_version                = "0.99"
+        self.str_version                = "1.0.0"
 
         self.b_anonDo                   = False
         self.str_studyFileName          = 'study.json'

@@ -1,14 +1,14 @@
-pfdicom_rev
+pfdicom_agesort
 ==================
 
-.. image:: https://badge.fury.io/py/pfdicom_rev.svg
-    :target: https://badge.fury.io/py/pfdicom_rev
+.. image:: https://badge.fury.io/py/pfdicom_agesort.svg
+    :target: https://badge.fury.io/py/pfdicom_agesort
 
-.. image:: https://travis-ci.org/FNNDSC/pfdicom_rev.svg?branch=master
-    :target: https://travis-ci.org/FNNDSC/pfdicom_rev
+.. image:: https://travis-ci.org/FNNDSC/pfdicom_agesort.svg?branch=master
+    :target: https://travis-ci.org/FNNDSC/pfdicom_agesort
 
 .. image:: https://img.shields.io/badge/python-3.5%2B-blue.svg
-    :target: https://badge.fury.io/py/pfdicom_rev
+    :target: https://badge.fury.io/py/pfdicom_agesort
 
 .. contents:: Table of Contents
 
@@ -16,31 +16,17 @@ pfdicom_rev
 Quick Overview
 --------------
 
--  ``pfdicom_rev`` processes DICOM trees for the ReV viewer.
+-  ``pfdicom_agesort`` processes ChRIS conformant PACS pull trees and reorders
+    content according to an explicit <year>/<month>/<exanmple> structure.
 
 Overview
 --------
 
-``pfdicom_rev`` processes directories containing DICOM files for the ReV viewer by converting DCM files to JPG previews and generating JSON series and study summary files, as well as index.html per study.
-
-The script accepts an ``<inputDir>`` which should be the (absolute) root dir of the ReV library. All file locations will be referenced relative to this root dir in the JSON descriptor files.
-
-``pfdicom_rev`` performs a mulit-pass loop over the file tree space as defined in the ``[--stage <stage>]`` flag below.
+``pfdicom_agesort`` repacks a ChRIS-default tree of MRI/DICOM data to an explicit age-reflecting organization. The program performs a mulit-pass loop over the file tree space as defined in the [--stage <stage>] flag below.
 
 NOTE:
 
-* ``pfdicom_rev`` relies on ImageMagick for many of its operations, including the DCM to JPG conversion, JPG resize, and preview  strip creation.
-
-* In some cases, default limits for ``ImageMagick`` are too low for generating preview strips, especially if a given DICOM series has many (more than 100) DICOM files. One fix for this is to edit the ``policy.xml`` file pertaining to ``ImageMagick`` and set the image ``width`` and ``height`` specifiers to 100 kilo-pixels (the default is about 16KP).
-
-.. code:: xml
-
-    <policy domain="resource" name="width" value="100KP"/>
-    <policy domain="resource" name="height" value="100KP"/>        
-
-Please see here_ for more information.
-
-.. _here: https://imagemagick.org/script/resources.php
+* ``pfdicom_agesort`` is dervied from ``pfdicom_tagExtract``. Please consult the documentation for ``pfdicom_tagExtract`` for additional information.
 
 Installation
 ------------
@@ -62,7 +48,7 @@ by fetching it from PyPI
 
 .. code:: bash
 
-        pip3 install pfdicom_rev
+        pip3 install pfdicom_agesort
 
 Command line arguments
 ----------------------
@@ -83,8 +69,8 @@ Command line arguments
         to the input directory, and each "leaf" node will contain the analysis
         results.
 
-        For ReV, this is often the special directive '%inputDir' which directs
-        the system to generate all outputs in the input tree directly.
+        In the case of `pfdicom_agesort`, this <outputDir> is the root of the
+        age sorted tree.
 
         [--outputLeafDir <outputLeafDirFormat>]
         If specified, will apply the <outputLeafDirFormat> to the output
@@ -100,59 +86,68 @@ Command line arguments
         final directory containing output with the text 'preview-' which
         can be useful in describing some features of the output set.
 
-        [-T|--tagStruct <JSONtagStructure>]
-        Parse the tags and their "subs" from a JSON formatted <JSONtagStucture>
-        passed directly in the command line. This is used in the optional 
-        DICOM anonymization.
+        [-F|--tagFile <tagFile>]
+        Read the tags, one-per-line in <tagFile>, and print the
+        corresponding tag information in the DICOM <inputFile>.
 
-        [-S|--server <server>]
-        The name of the server hosting the ReV viewer.
+        [-T|--tagList <tagList>]
+        Read the list of comma-separated tags in <tagList>, and print the
+        corresponding tag information parsed from the DICOM <inputFile>.
 
-        Defaults to 'http://fnndsc.tch.harvard.edu'.
+        [-S|--symlinkDCMdata]
+        If true/specified, perform a symlink of the original DICOM data to
+        the final output directory tree. If false, a copy of the original
+        DICOM data is performed.
+
+        [-D|--doNotCleanUp]
+        If true, do not cleanup the original tag data tree created when
+        analysing the original DICOM tree structure.
+
+        [-m|--image <[<index>:]imageFile>]
+        If specified, also convert the <inputFile> to <imageFile>. If the
+        name is preceded by an index and colon, then convert this indexed 
+        file in the particular <inputDir>.
+
+        [-s|--imageScale <factor>[:<interpolation>]]
+        If an image conversion is specified, this flag will scale the image
+        by <factor> and use an interpolation <order>. This is useful in 
+        increasing the size of images for the html output.
+
+        Note that certain interpolation choices can result in a significant
+        slowdown!
+
+            interpolation order:
+            
+            'none', 'nearest', 'bilinear', 'bicubic', 'spline16',
+            'spline36', 'hanning', 'hamming', 'hermite', 'kaiser', 'quadric',
+            'catrom', 'gaussian', 'bessel', 'mitchell', 'sinc', 'lanczos'
+
+        -o|--outputFileStem <outputFileStem>
+        The output file stem to store data. This should *not* have a file
+        extension, or rather, any "." in the name are considered part of 
+        the stem and are *not* considered extensions.
+
+        [-t|--outputFileType <outputFileType>]
+        A comma specified list of output types. These can be:
+
+            o <type>    <ext>       <desc>
+            o raw       -raw.txt    the raw internal dcm structure to string
+            o json      .json       a json representation
+            o html      .html       an html representation with optional image
+            o dict      -dict.txt   a python dictionary
+            o col       -col.txt    a two-column text representation (tab sep)
+            o csv       .csv        a csv representation
+
+        Note that if not specified, a default type of 'raw' is assigned.
 
         [--stage <stage>]
         Stage to execute -- mostly for debugging purposes and useful if running a 
-        particular stage repeatedly. There are some caveats to this -- mostly that
-        stages are serially dependent, thus running "--stage 4" off the bat will
-        not work since previous stages have not completed.
+        particular stage repeatedly.
 
-        The actual thread of stage flow and dependencies are:
-
-
-
-                                      /--stage 2--\ 
-                                     /             \ 
-                            stage 1--               --stage 4
-                                     \             /
-                                      \--stage 3--/ 
-
-
-            [1] analyize all the DCM files in the <inputDir>
-                *   convert each DCM to JPG (native)
-                *   resize all JPGs to 96x96 and generate preview strip
-                *   tag middle JPG in series based on series length
-                *   create JSON per example series-level descriptors:
-                        * declare location of actual series DCM files
-                *   create JSON per month example-level descriptors
-                        * declare location of middle thumbnail JPGs
-
-            [2] analyze all the JSON series-level descriptors from stage [1]
-                *   create study-level JSON descriptors that summarize
-                    all series JSON data into one file
-
-            [3] analyze all the JSON per month example-level descriptors
-                from stage [1]
-                *   create simple overview per-month index.html that shows
-                    per-example thumbnails
-
-            [4] analyze all JSON study level descriptors from stage [2]
-                *   create tree map for mapping of arbitrary patient age to
-                    closest hits in tree
-
-        [--studyJSON <studyJSONfile>]
+        [--infoJSON <infoJSONfile>]
         The name of the study JSON file. 
 
-        Defaults to 'description.json'.
+        Defaults to 'info.json'.
 
         [--threads <numThreads>]
         If specified, break the innermost analysis loop into <numThreads>
@@ -185,14 +180,23 @@ Command line arguments
 Examples
 --------
 
-Process a tree containing DICOM files for ReV:
+Process a ChRIS tree containing DICOM:
 
 .. code:: bash
 
-        pfdicom_rev                                         \\
-                    -I /var/www/html/rev -e dcm             \\
-                    -O %inputDir                            \\
-                    --threads 0 --printElapsedTime          \\
-                    -v 3
+        pfdicom_agesort                                             \\
+                    -I /neuro/users/chris/data/mrn                  \\
+                    -O /neuro/users/chris/data/age                  \\
+                    --threads 0 --printElapsedTime                  \\
+                    -e dcm                                          \\
+                    -o '%_md5|6_PatientID-%PatientAge'              \\
+                    -m 'm:%_nospc|-_ProtocolName.jpg'               \\
+                    -s 3:none                                       \\
+                    --useIndexhtml                                  \\
+                    -t raw,json,html,dict,col,csv                   \\
+                    --followLinks                                   \\
+                    --symlinkDCMdata                                \\
+                    -v 3                                            \\
+                    --threads 0
 
-which will run a DCM and JSON analysis, printing the final elapsed processing time.
+which will reorganize the file trees as shown, printing the final elapsed processing time.

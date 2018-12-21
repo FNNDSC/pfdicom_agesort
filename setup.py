@@ -11,18 +11,18 @@ def readme():
         return f.read()
 
 setup(
-      name             =   'pfdicom_rev',
-      version          =   '2.4.2',
-      description      =   'Process DICOM trees and create JSON summares for the ReV viewer.',
+      name             =   'pfdicom_agesort',
+      version          =   '1.0.0',
+      description      =   'Process ChRIS trees of DICOM data and reorder by age.',
       long_description =   readme(),
       author           =   'FNNDSC',
       author_email     =   'dev@babymri.org',
-      url              =   'https://github.com/FNNDSC/pfdicom_rev',
-      packages         =   ['pfdicom_rev'],
-      install_requires =   ['pfdicom'],
+      url              =   'https://github.com/FNNDSC/pfdicom_agesort',
+      packages         =   ['pfdicom_agesort'],
+      install_requires =   ['pfdicom', 'pfdicom_tagExtrat', 'pftree', 'pfmisc'],
       #test_suite       =   'nose.collector',
       #tests_require    =   ['nose'],
-      scripts          =   ['bin/pfdicom_rev'],
+      scripts          =   ['bin/pfdicom_agesort'],
       license          =   'MIT',
       zip_safe         =   False
 )

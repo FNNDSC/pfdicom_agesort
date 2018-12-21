@@ -19,7 +19,7 @@ import  pfmisc
 from    pfmisc._colors      import Colors
 from    pfmisc              import other
 
-str_version = "0.99"
+str_version = "1.0.0"
 str_desc    = Colors.CYAN + """
 
 
@@ -91,11 +91,20 @@ def synopsis(ab_shortOnly = False):
 
     BRIEF EXAMPLE                                         
 
-        pfdicom_agesort                                     \\
-                    -I /neuro/users/chris/data/mrn          \\
-                    -O /neuro/users/chris/data/age          \\
-                    --threads 0 --printElapsedTime          \\
-                    -v 3
+        pfdicom_agesort                                             \\
+                    -I /neuro/users/chris/data/mrn                  \\
+                    -O /neuro/users/chris/data/age                  \\
+                    --threads 0 --printElapsedTime                  \\
+                    -e dcm                                          \\
+                    -o '%_md5|6_PatientID-%PatientAge'              \\
+                    -m 'm:%_nospc|-_ProtocolName.jpg'               \\
+                    -s 3:none                                       \\
+                    --useIndexhtml                                  \\
+                    -t raw,json,html,dict,col,csv                   \\
+                    --followLinks                                   \\
+                    --symlinkDCMdata                                \\
+                    -v 3                                            \\
+                    --threads 0
 
     """
 
@@ -108,6 +117,10 @@ def synopsis(ab_shortOnly = False):
         defined in the [--stage <stage>] flag below.
 
         NOTE:
+        
+        * ``pfdicom_agesort`` is dervied from ``pfdicom_tagExtract``. 
+          Please consult the documentation for ``pfdicom_tagExtract`` 
+          for additional information.
 
 
     ARGS
@@ -238,11 +251,20 @@ def synopsis(ab_shortOnly = False):
 
     Process a ChRIS tree containing DICOM files:
 
-        pfdicom_agesort                                     \\
-                    -I /neuro/users/chris/data/mrn          \\
-                    -O /neuro/users/chris/data/age          \\
-                    --threads 0 --printElapsedTime          \\
-                    -v 3
+        pfdicom_agesort                                             \\
+                    -I /neuro/users/chris/data/mrn                  \\
+                    -O /neuro/users/chris/data/age                  \\
+                    --threads 0 --printElapsedTime                  \\
+                    -e dcm                                          \\
+                    -o '%_md5|6_PatientID-%PatientAge'              \\
+                    -m 'm:%_nospc|-_ProtocolName.jpg'               \\
+                    -s 3:none                                       \\
+                    --useIndexhtml                                  \\
+                    -t raw,json,html,dict,col,csv                   \\
+                    --followLinks                                   \\
+                    --symlinkDCMdata                                \\
+                    -v 3                                            \\
+                    --threads 0
 
     which will reorganize the file trees as shown, printing the 
     final elapsed processing time.
