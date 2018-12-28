@@ -12,14 +12,14 @@ def readme():
 
 setup(
       name             =   'pfdicom_agesort',
-      version          =   '1.0.0',
+      version          =   '1.0.2',
       description      =   'Process ChRIS trees of DICOM data and reorder by age.',
       long_description =   readme(),
       author           =   'FNNDSC',
       author_email     =   'dev@babymri.org',
       url              =   'https://github.com/FNNDSC/pfdicom_agesort',
       packages         =   ['pfdicom_agesort'],
-      install_requires =   ['pfdicom', 'pfdicom_tagExtrat', 'pftree', 'pfmisc'],
+      install_requires =   ['pfdicom'],
       #test_suite       =   'nose.collector',
       #tests_require    =   ['nose'],
       scripts          =   ['bin/pfdicom_agesort'],
