@@ -93,7 +93,7 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         #
         self.str_desc                   = ''
         self.__name__                   = "pfdicom_agesort"
-        self.str_version                = "1.0.2"
+        self.str_version                = "1.0.4"
 
         self.b_anonDo                   = False
         self.str_studyFileName          = 'study.json'
@@ -322,11 +322,12 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
 
         or 16170 days | 44-yr/03-mo/07-da
 
-        If <astr_date1> and <astr_date2> do not have to be in chronological order.
+        <astr_date1> and <astr_date2> do not have to be in chronological order.
         The function works on absolute date difference, not relative.
 
-        Note that since months have varying length, and since uses average year and
-        month lengths, there migth be minor day-resolution rounding problems.
+        Note that since months have varying length, and since this method
+        uses average year and month lengths, there migth be minor day-resolution 
+        rounding problems.
 
         For instance
 
@@ -342,7 +343,6 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         """
         birthY, birthM, birthD  = int(astr_date1[0:4]), int(astr_date1[4:6]), int(astr_date1[6:8])
         scanY, scanM, scanD     = int(astr_date2[0:4]), int(astr_date2[4:6]), int(astr_date2[6:8])
-
         birthDate               = datetime.date(birthY, birthM, birthD)
         scanDate                = datetime.date(scanY, scanM, scanD)
         dateDiff                = abs(scanDate - birthDate)
@@ -378,21 +378,61 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
         d_ret               = super().outputSaveCallback(at_data, **kwargs)
 
         def jsonSeriesDescription_generate():
+
+            def aquistionDate_determine(DCM, str_studyDate, str_seriesDate):
+                """
+                Try and "intelligently" determine the aquisitionDate
+                given many weirdness.
+                """
+                str_aquisitionDate  = ""
+                try:
+                    str_aquisitionDate      = DCM.AcquistionDate
+                except:
+                    try:
+                        if len(str_studyDate):
+                            str_aquisitionDate  = str_studyDate
+                        else:
+                            str_aquisitionDate  = str_seriesDate
+                    except:
+                        try:
+                            str_aquisitionDate  = str_seriesDate
+                        except:
+                            str_aquisitionDate  = ""
+                if str_aquisitionDate == '19000101':
+                    if str_studyDate != '19000101':
+                        str_aquisitionDate  = str_studyDate
+                    else:
+                        str_aquisitionDate  = str_seriesDate
+                return str_aquisitionDate
+
+            def DICOMtag_lookup(DCM, str_tagName, str_notFound = ""):
+                try:
+                    str_tag             = getattr(DCM, str_tagName)
+                except:
+                    if len(str_notFound):
+                        str_tag             = str_notFound
+                    else:
+                        str_tag             = "%s not found" % str_tagName
+                return str_tag
+
             # pudb.set_trace()
             DCM                         = d_outputInfo['d_DCMfileRead']['d_DICOM']['dcm']
             str_jsonFileName            = '%s-series.json' % path
-            try:
-                dcm_modalitiesInStudy   = DCM.ModalitiesInStudy
-            except:
-                dcm_modalitiesInStudy   = "not found"
-            str_patientBirthDate        = DCM.PatientBirthDate
-            try:
-                str_aquisitionDate      = DCM.AcquistionDate
-            except:
-                try:
-                    str_aquisitionDate  = DCM.SeriesDate
-                except:
-                    str_aquisitionDate  = DCM.StudyDate
+            str_seriesInstanceUID       = DICOMtag_lookup(DCM,  "SeriesInstanceUID")
+            dcm_modalitiesInStudy       = DICOMtag_lookup(DCM,  "ModalitiesInStudy")
+            str_seriesDescription       = DICOMtag_lookup(DCM,  "SeriesDescription")
+            str_studyDescription        = DICOMtag_lookup(DCM,  "StudyDescription")
+            str_patientID               = DICOMtag_lookup(DCM,  "PatientID")
+            str_patientName             = DICOMtag_lookup(DCM,  "PatientName")
+            str_seriesDate              = DICOMtag_lookup(DCM,  "SeriesDate",
+                                                                "19000101")
+            str_studyDate               = DICOMtag_lookup(DCM,  "StudyDate",
+                                                                "19000101")
+            str_patientBirthDate        = DICOMtag_lookup(DCM,  "PatientBirthDate",
+                                                                "19000101")
+            str_aquisitionDate          = aquistionDate_determine(  DCM,
+                                                                    str_studyDate,
+                                                                    str_seriesDate,)
             (days, yr, mo, da)          = pfdicom_agesort.dateDiff_find(
                                                 str_patientBirthDate,
                                                 str_aquisitionDate
@@ -412,33 +452,15 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
                                     "da":           da
                                 }
                             },
-                            "SeriesInstanceUID": {
-                                "value": '%s' % DCM.SeriesInstanceUID,
-                            },
-                            "uid": {
-                                "value": '%s' % DCM.SeriesInstanceUID,
-                            },
-                            "SeriesDescription": {
-                                "value": '%s' % DCM.SeriesDescription,
-                            },
-                            "StudyDescription": {
-                                "value": '%s' % DCM.StudyDescription,
-                            },
-                            "ModalitiesInStudy": {
-                                    "value": '%s' % dcm_modalitiesInStudy,
-                            },
-                            "PatientID": {
-                                "value": '%s' % DCM.PatientID,
-                            },
-                            "PatientName": {
-                                "value": '%s' % DCM.PatientName,
-                            },
-                            "PatientBirthDate": {
-                                "value": '%s' % DCM.PatientBirthDate   
-                            },
-                            "AcquistionDate": {
-                                "value": '%s' % str_aquisitionDate   
-                            }
+                        "SeriesInstanceUID": { "value": '%s' % str_seriesInstanceUID,},
+                        "uid":               { "value": '%s' % str_seriesInstanceUID,},
+                        "SeriesDescription": { "value": '%s' % str_seriesDescription,},
+                        "StudyDescription":  { "value": '%s' % str_studyDescription,},
+                        "ModalitiesInStudy": { "value": '%s' % dcm_modalitiesInStudy,},
+                        "PatientID":         { "value": '%s' % str_patientID,},
+                        "PatientName":       { "value": '%s' % str_patientName,},
+                        "PatientBirthDate":  { "value": '%s' % str_patientBirthDate},
+                        "AcquistionDate":    { "value": '%s' % str_aquisitionDate}
                         }
                     ],
                 },
@@ -458,6 +480,29 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
             * JSON study descriptor file. One file per study.
         """
 
+        def age_lookup(dl_agePerStudy):
+            """
+            This method examines all the age-related dictionaries
+            for this study and attempts to find the 'correct' age.
+
+            Some DICOM studies contain report files which often have
+            incomplete DICOM tag information. As a result, some age
+            dictionaries can have incorrect age values, usually as the
+            result of an AquisitionDate of 19000101 being used as a
+            placeholder.
+
+            This nested function attempts to mitigate against that
+            by checking for 'daysTotal' field and ignoring that entry
+            if the daysTotal exceeds 29200 (or 80 years).
+            """
+            for d_age in dl_agePerStudy:
+                daysTotal   = d_age['AgeCalculated']['value']['daysTotal']
+                if daysTotal > 29200:
+                    continue
+                else:
+                    break
+            return d_age['AgeCalculated']['value']
+
         path                = at_data[0]
         d_outputInfo        = at_data[1]
         other.mkdir(self.str_outputDir)
@@ -469,7 +514,7 @@ class pfdicom_agesort(pfdicom_tagExtract.pfdicom_tagExtract):
             str_relPath     = './'
         filesSaved          = 0
 
-        d_age               = d_outputInfo['l_json'][0]['AgeCalculated']['value']
+        d_age               = age_lookup(d_outputInfo['l_json'])
         str_studyDCMinputDir= os.path.dirname(d_outputInfo['l_json'][0]['DCMinputPath']['value'])
         str_leafNode        = '%s-%s' % (os.path.dirname(str_relPath), 
                                          os.path.basename(str_relPath).split('-')[-1])
