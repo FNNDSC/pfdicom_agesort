@@ -12,7 +12,7 @@ def readme():
 
 setup(
       name             =   'pfdicom_agesort',
-      version          =   '1.0.4,
+      version          =   '1.0.4',
       description      =   'Process ChRIS trees of DICOM data and reorder by age.',
       long_description =   readme(),
       author           =   'FNNDSC',
